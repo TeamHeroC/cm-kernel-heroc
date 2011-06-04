@@ -56,50 +56,9 @@ struct mdp_info {
 	struct mdp_blit_req *req;
 	uint32_t state;
 	struct timer_list standby_timer;
-	struct timer_list dma_timer;
 
 	int (*enable_irq)(struct mdp_info *mdp, uint32_t mask);
 	int (*disable_irq)(struct mdp_info *mdp, uint32_t mask);
-};
-
-struct mdp_lcdc_info {
-	struct mdp_info			*mdp;
-	struct clk			*mdp_clk;
-	struct clk			*pclk;
-	struct clk			*pad_pclk;
-	struct msm_panel_data		fb_panel_data;
-	struct platform_device		fb_pdev;
-	struct msm_lcdc_platform_data	*pdata;
-	uint32_t fb_start;
-
-	struct msmfb_callback		frame_start_cb;
-	wait_queue_head_t		vsync_waitq;
-	int				got_vsync;
-	unsigned			color_format;
-	struct {
-		uint32_t	clk_rate;
-		uint32_t	hsync_ctl;
-		uint32_t	vsync_period;
-		uint32_t	vsync_pulse_width;
-		uint32_t	display_hctl;
-		uint32_t	display_vstart;
-		uint32_t	display_vend;
-		uint32_t	hsync_skew;
-		uint32_t	polarity;
-	} parms;
-	atomic_t        blank_count;
-	struct mutex    blank_lock;
-};
-
-struct panel_icm_info {
-	bool	icm_mode;
-	bool	icm_doable;
-	bool	clock_enabled;
-	int	panel_update;
-	struct mutex icm_lock;
-	struct mdp_lcdc_info *lcdc;
-	spinlock_t lock;
-	void (*force_leave)(void);
 };
 
 extern int mdp_out_if_register(struct mdp_device *mdp_dev, int interface,
@@ -120,7 +79,6 @@ int mdp_wait(struct mdp_info *mdp, uint32_t mask, wait_queue_head_t *wq);
 
 #define mdp_writel(mdp, value, offset) writel(value, mdp->base + offset)
 #define mdp_readl(mdp, offset) readl(mdp->base + offset)
-#define panel_to_lcdc(p) container_of((p), struct mdp_lcdc_info, fb_panel_data)
 
 /* define mdp state for multi purpose */
 #define MDP_STATE_STANDBY		(1 << 0)
@@ -337,38 +295,26 @@ int mdp_wait(struct mdp_info *mdp, uint32_t mask, wait_queue_head_t *wq);
 #define MDP_DMA_S_OUT_XY                 (0xa0010)
 
 #ifdef CONFIG_MSM_MDP40
-#define MDP_LCDC_EN                      (0xc0000)
-#define MDP_LCDC_HSYNC_CTL               (0xc0004)
-#define MDP_LCDC_VSYNC_PERIOD            (0xc0008)
-#define MDP_LCDC_VSYNC_PULSE_WIDTH       (0xc000c)
-#define MDP_LCDC_DISPLAY_HCTL            (0xc0010)
-#define MDP_LCDC_DISPLAY_V_START         (0xc0014)
-#define MDP_LCDC_DISPLAY_V_END           (0xc0018)
-#define MDP_LCDC_ACTIVE_HCTL             (0xc001c)
-#define MDP_LCDC_ACTIVE_V_START          (0xc0020)
-#define MDP_LCDC_ACTIVE_V_END            (0xc0024)
-#define MDP_LCDC_BORDER_CLR              (0xc0028)
-#define MDP_LCDC_UNDERFLOW_CTL           (0xc002c)
-#define MDP_LCDC_HSYNC_SKEW              (0xc0030)
-#define MDP_LCDC_TEST_CTL                (0xc0034)
-#define MDP_LCDC_CTL_POLARITY            (0xc0038)
+#define MDP_LCDC_BASE			(0xc0000)
 #else
-#define MDP_LCDC_EN                      (0xe0000)
-#define MDP_LCDC_HSYNC_CTL               (0xe0004)
-#define MDP_LCDC_VSYNC_PERIOD            (0xe0008)
-#define MDP_LCDC_VSYNC_PULSE_WIDTH       (0xe000c)
-#define MDP_LCDC_DISPLAY_HCTL            (0xe0010)
-#define MDP_LCDC_DISPLAY_V_START         (0xe0014)
-#define MDP_LCDC_DISPLAY_V_END           (0xe0018)
-#define MDP_LCDC_ACTIVE_HCTL             (0xe001c)
-#define MDP_LCDC_ACTIVE_V_START          (0xe0020)
-#define MDP_LCDC_ACTIVE_V_END            (0xe0024)
-#define MDP_LCDC_BORDER_CLR              (0xe0028)
-#define MDP_LCDC_UNDERFLOW_CTL           (0xe002c)
-#define MDP_LCDC_HSYNC_SKEW              (0xe0030)
-#define MDP_LCDC_TEST_CTL                (0xe0034)
-#define MDP_LCDC_CTL_POLARITY            (0xe0038)
+#define MDP_LCDC_BASE			(0xe0000)
 #endif
+
+#define MDP_LCDC_EN                      (MDP_LCDC_BASE + 0x00)
+#define MDP_LCDC_HSYNC_CTL               (MDP_LCDC_BASE + 0x04)
+#define MDP_LCDC_VSYNC_PERIOD            (MDP_LCDC_BASE + 0x08)
+#define MDP_LCDC_VSYNC_PULSE_WIDTH       (MDP_LCDC_BASE + 0x0c)
+#define MDP_LCDC_DISPLAY_HCTL            (MDP_LCDC_BASE + 0x10)
+#define MDP_LCDC_DISPLAY_V_START         (MDP_LCDC_BASE + 0x14)
+#define MDP_LCDC_DISPLAY_V_END           (MDP_LCDC_BASE + 0x18)
+#define MDP_LCDC_ACTIVE_HCTL             (MDP_LCDC_BASE + 0x1c)
+#define MDP_LCDC_ACTIVE_V_START          (MDP_LCDC_BASE + 0x20)
+#define MDP_LCDC_ACTIVE_V_END            (MDP_LCDC_BASE + 0x24)
+#define MDP_LCDC_BORDER_CLR              (MDP_LCDC_BASE + 0x28)
+#define MDP_LCDC_UNDERFLOW_CTL           (MDP_LCDC_BASE + 0x2c)
+#define MDP_LCDC_HSYNC_SKEW              (MDP_LCDC_BASE + 0x30)
+#define MDP_LCDC_TEST_CTL                (MDP_LCDC_BASE + 0x34)
+#define MDP_LCDC_CTL_POLARITY            (MDP_LCDC_BASE + 0x38)
 
 #define MDP_PPP_SCALE_STATUS             (0x50000)
 #define MDP_PPP_BLEND_STATUS             (0x70000)

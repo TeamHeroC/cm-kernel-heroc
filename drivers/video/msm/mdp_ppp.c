@@ -18,9 +18,7 @@
 #include <linux/major.h>
 #include <linux/msm_hw3d.h>
 #include <linux/msm_mdp.h>
-#include <linux/mutex.h>
 #include <linux/android_pmem.h>
-#include <linux/wait.h>
 #include <mach/msm_fb.h>
 
 #include "mdp_hw.h"
@@ -58,17 +56,17 @@ static uint32_t dst_img_cfg[] = {
 
 static const uint32_t bytes_per_pixel[] = {
 	[MDP_RGB_565] = 2,
-	[MDP_XRGB_8888] = 4,
-	[MDP_Y_CBCR_H2V2] = 1,
-	[MDP_ARGB_8888] = 4,
 	[MDP_RGB_888] = 3,
-	[MDP_Y_CRCB_H2V2] = 1,
-	[MDP_YCRYCB_H2V1] = 2,
-	[MDP_Y_CRCB_H2V1] = 1,
-	[MDP_Y_CBCR_H2V1] = 1,
+	[MDP_XRGB_8888] = 4,
+	[MDP_ARGB_8888] = 4,
 	[MDP_RGBA_8888] = 4,
 	[MDP_BGRA_8888] = 4,
 	[MDP_RGBX_8888] = 4,
+	[MDP_Y_CBCR_H2V1] = 1,
+	[MDP_Y_CBCR_H2V2] = 1,
+	[MDP_Y_CRCB_H2V1] = 1,
+	[MDP_Y_CRCB_H2V2] = 1,
+	[MDP_YCRYCB_H2V1] = 2
 };
 
 static uint32_t dst_op_chroma[] = {
@@ -311,7 +309,7 @@ static void blit_blend(struct mdp_blit_req *req, struct ppp_regs *regs)
 	set_blend_region(&req->dst, &req->dst_rect, regs);
 }
 
-static int blit_scale(struct mdp_info *mdp, struct mdp_blit_req *req,
+static int blit_scale(const struct mdp_info *mdp, struct mdp_blit_req *req,
 		      struct ppp_regs *regs)
 {
 	struct mdp_rect dst_rect;
@@ -332,7 +330,7 @@ static int blit_scale(struct mdp_info *mdp, struct mdp_blit_req *req,
 	}
 
 	if (mdp_ppp_cfg_scale(mdp, regs, &req->src_rect, &dst_rect,
-				req->src.format, req->dst.format)) {
+			      req->src.format, req->dst.format)) {
 		DLOG("crap, bad scale\n");
 		return -1;
 	}
@@ -341,7 +339,7 @@ static int blit_scale(struct mdp_info *mdp, struct mdp_blit_req *req,
 	return 0;
 }
 
-static void blit_blur(struct mdp_info *mdp, struct mdp_blit_req *req,
+static void blit_blur(const struct mdp_info *mdp, struct mdp_blit_req *req,
 		      struct ppp_regs *regs)
 {
 	int ret;
@@ -538,7 +536,7 @@ static void mdp_dump_blit(struct mdp_blit_req *req)
 }
 #endif
 
-static int process_blit(struct mdp_info *mdp, struct mdp_blit_req *req,
+static int process_blit(const struct mdp_info *mdp, struct mdp_blit_req *req,
 		 struct file *src_file, unsigned long src_start, unsigned long src_len,
 		 struct file *dst_file, unsigned long dst_start, unsigned long dst_len)
 {
@@ -815,4 +813,32 @@ void mdp_ppp_handle_isr(struct mdp_info *mdp, uint32_t mask)
 		wake_up(&mdp_ppp_waitqueue);
 }
 
+int mdp_fb_mirror(struct mdp_device *mdp_dev,
+		struct fb_info *src_fb, struct fb_info *dst_fb,
+		struct mdp_blit_req *req)
+{
+	int ret;
+	struct mdp_info *mdp = container_of(mdp_dev, struct mdp_info, mdp_dev);
 
+	if (!src_fb || !dst_fb)
+		return -EINVAL;
+	mdp->enable_irq(mdp, DL0_ROI_DONE);
+	ret = process_blit(mdp, req, (struct file *)-1, src_fb->fix.smem_start,
+			src_fb->fix.smem_len, (struct file *)-1,
+			dst_fb->fix.smem_start, dst_fb->fix.smem_len);
+	if (ret)
+		goto err_bad_blit;
+
+	ret = mdp_ppp_wait(mdp);
+	if (ret) {
+		pr_err("mdp_ppp_wait error\n");
+		goto err_wait_failed;
+	}
+	return 0;
+
+err_bad_blit:
+	mdp->disable_irq(mdp, DL0_ROI_DONE);
+
+err_wait_failed:
+	return ret;
+}

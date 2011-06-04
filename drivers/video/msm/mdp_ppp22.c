@@ -1016,7 +1016,7 @@ static int scale_params(uint32_t dim_in, uint32_t dim_out, uint32_t origin,
 	return 0;
 }
 
-int mdp_ppp_cfg_scale(struct mdp_info *mdp, struct ppp_regs *regs,
+int mdp_ppp_cfg_scale(const struct mdp_info *mdp, struct ppp_regs *regs,
 		      struct mdp_rect *src_rect, struct mdp_rect *dst_rect,
 		      uint32_t src_format, uint32_t dst_format)
 {
@@ -1070,7 +1070,7 @@ int mdp_ppp_cfg_scale(struct mdp_info *mdp, struct ppp_regs *regs,
 }
 
 
-int mdp_ppp_load_blur(struct mdp_info *mdp)
+int mdp_ppp_load_blur(const struct mdp_info *mdp)
 {
 	if (!(downscale_x_table == MDP_DOWNSCALE_BLUR &&
               downscale_y_table == MDP_DOWNSCALE_BLUR)) {
@@ -1082,13 +1082,14 @@ int mdp_ppp_load_blur(struct mdp_info *mdp)
 	return 0;
 }
 
-void mdp_ppp_init_scale(struct mdp_info *mdp)
+void mdp_ppp_init_scale(const struct mdp_info *mdp)
 {
 	downscale_x_table = MDP_DOWNSCALE_MAX;
 	downscale_y_table = MDP_DOWNSCALE_MAX;
 
 	load_table(mdp, mdp_upscale_table, ARRAY_SIZE(mdp_upscale_table));
 }
+
 
 int mdp_ppp_validate_blit(struct mdp_info *mdp, struct mdp_blit_req *req)
 {

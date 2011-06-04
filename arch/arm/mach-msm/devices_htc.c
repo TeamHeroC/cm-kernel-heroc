@@ -26,6 +26,7 @@
 #include <mach/board_htc.h>
 #include <mach/msm_hsusb.h>
 #include <linux/usb/android_composite.h>
+#include <linux/usb/f_accessory.h>
 
 #include <asm/mach/flash.h>
 #include <asm/setup.h>
@@ -36,6 +37,8 @@
 #include <mach/msm_rpcrouter.h>
 #include <mach/msm_iomap.h>
 #include <asm/mach/mmc.h>
+
+#include <mach/msm_rpc_version.h>
 
 #if 0
 struct platform_device *devices[] __initdata = {
@@ -85,7 +88,7 @@ static int hsusb_phy_init_seq[] = { 0x40, 0x31, 0x1D, 0x0D, 0x1D, 0x10, -1 };
 struct msm_hsusb_platform_data msm_hsusb_pdata = {
 	.phy_reset = internal_phy_reset,
 	.phy_init_seq = hsusb_phy_init_seq,
-	.usb_connected = notify_usb_connected,
+//	.usb_connected = notify_usb_connected, TODO
 };
 
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
@@ -137,9 +140,17 @@ static char *usb_functions_rndis_adb[] = {
 	"adb",
 };
 
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+static char *usb_functions_accessory[] = { "accessory" };
+static char *usb_functions_accessory_adb[] = { "accessory", "adb" };
+#endif
+
 static char *usb_functions_all[] = {
 #ifdef CONFIG_USB_ANDROID_RNDIS
 	"rndis",
+#endif
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+	"accessory",
 #endif
 	"usb_mass_storage",
 	"adb",
@@ -169,6 +180,20 @@ static struct android_usb_product usb_products[] = {
 		.num_functions	= ARRAY_SIZE(usb_functions_rndis_adb),
 		.functions	= usb_functions_rndis_adb,
 	},
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+	{
+		.vendor_id	= USB_ACCESSORY_VENDOR_ID,
+		.product_id	= USB_ACCESSORY_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_accessory),
+		.functions	= usb_functions_accessory,
+	},
+	{
+		.vendor_id	= USB_ACCESSORY_VENDOR_ID,
+		.product_id	= USB_ACCESSORY_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_accessory_adb),
+		.functions	= usb_functions_accessory_adb,
+	},
+#endif
 };
 
 static struct android_usb_platform_data android_usb_pdata = {
@@ -225,6 +250,32 @@ static struct android_pmem_platform_data pmem_camera_pdata = {
 	.cached = 0,
 };
 
+#ifdef CONFIG_BUILD_CIQ
+static struct android_pmem_platform_data pmem_ciq_pdata = {
+        .name = "pmem_ciq",
+        .no_allocator = 0,
+        .cached = 0,
+};
+
+static struct android_pmem_platform_data pmem_ciq1_pdata = {
+        .name = "pmem_ciq1",
+        .no_allocator = 0,
+        .cached = 0,
+};
+
+static struct android_pmem_platform_data pmem_ciq2_pdata = {
+        .name = "pmem_ciq2",
+        .no_allocator = 0,
+        .cached = 0,
+};
+
+static struct android_pmem_platform_data pmem_ciq3_pdata = {
+        .name = "pmem_ciq3",
+        .no_allocator = 0,
+        .cached = 0,
+};
+#endif
+
 static struct platform_device pmem_device = {
 	.name = "android_pmem",
 	.id = 0,
@@ -242,6 +293,32 @@ static struct platform_device pmem_camera_device = {
 	.id = 2,
 	.dev = { .platform_data = &pmem_camera_pdata },
 };
+
+#ifdef CONFIG_BUILD_CIQ
+static struct platform_device pmem_ciq_device = {
+        .name = "android_pmem",
+        .id = 5,
+        .dev = { .platform_data = &pmem_ciq_pdata },
+};
+
+static struct platform_device pmem_ciq1_device = {
+        .name = "android_pmem",
+        .id = 6,
+        .dev = { .platform_data = &pmem_ciq1_pdata },
+};
+
+static struct platform_device pmem_ciq2_device = {
+        .name = "android_pmem",
+        .id = 7,
+        .dev = { .platform_data = &pmem_ciq2_pdata },
+};
+
+static struct platform_device pmem_ciq3_device = {
+        .name = "android_pmem",
+        .id = 8,
+        .dev = { .platform_data = &pmem_ciq3_pdata },
+};
+#endif
 
 static struct resource ram_console_resource[] = {
 	{
@@ -288,53 +365,77 @@ static struct platform_device hw3d_device = {
 
 void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 {
+	printk("msm_add_mem_devices(");
+	printk("pmem_device ");
 	if (setting->pmem_size) {
 		pmem_pdata.start = setting->pmem_start;
 		pmem_pdata.size = setting->pmem_size;
 		platform_device_register(&pmem_device);
 	}
-
+	printk("pmem_adsp_device ");
 	if (setting->pmem_adsp_size) {
 		pmem_adsp_pdata.start = setting->pmem_adsp_start;
 		pmem_adsp_pdata.size = setting->pmem_adsp_size;
 		platform_device_register(&pmem_adsp_device);
 	}
+	printk("hw3d_device ");
+        if (setting->pmem_gpu0_size && setting->pmem_gpu1_size) {
+                struct resource *res;
 
-	if (setting->pmem_gpu0_size && setting->pmem_gpu1_size) {
-		struct resource *res;
+                res = platform_get_resource_byname(&hw3d_device, IORESOURCE_MEM,
+                                                   "smi");
+                res->start = setting->pmem_gpu0_start;
+                res->end = res->start + setting->pmem_gpu0_size - 1;
 
-		res = platform_get_resource_byname(&hw3d_device, IORESOURCE_MEM,
-						   "smi");
-		res->start = setting->pmem_gpu0_start;
-		res->end = res->start + setting->pmem_gpu0_size - 1;
-
-		res = platform_get_resource_byname(&hw3d_device, IORESOURCE_MEM,
-						   "ebi");
-		res->start = setting->pmem_gpu1_start;
-		res->end = res->start + setting->pmem_gpu1_size - 1;
-		platform_device_register(&hw3d_device);
-	}
-
+                res = platform_get_resource_byname(&hw3d_device, IORESOURCE_MEM,
+                                                   "ebi");
+                res->start = setting->pmem_gpu1_start;
+                res->end = res->start + setting->pmem_gpu1_size - 1;
+                platform_device_register(&hw3d_device);
+        }
+	printk("pmem_camera_device ");
 	if (setting->pmem_camera_size) {
 		pmem_camera_pdata.start = setting->pmem_camera_start;
 		pmem_camera_pdata.size = setting->pmem_camera_size;
 		platform_device_register(&pmem_camera_device);
 	}
-
+	printk("ram_console_device ");
 	if (setting->ram_console_size) {
 		ram_console_resource[0].start = setting->ram_console_start;
 		ram_console_resource[0].end = setting->ram_console_start
 			+ setting->ram_console_size - 1;
 		platform_device_register(&ram_console_device);
 	}
-}
+#ifdef CONFIG_BUILD_CIQ
+	printk("pmem_ciq_device ");
+        if(setting->pmem_ciq_size) {
+                pmem_ciq_pdata.start = setting->pmem_ciq_start;
+                pmem_ciq_pdata.size = setting->pmem_ciq_size;
+                platform_device_register(&pmem_ciq_device);
+        }
+	printk("pmem_ciqq_device ");
 
-#define PM_LIBPROG      0x30000061
-#if (CONFIG_MSM_AMSS_VERSION == 6220) || (CONFIG_MSM_AMSS_VERSION == 6225)
-#define PM_LIBVERS      0xfb837d0b
-#else
-#define PM_LIBVERS      0x10001
+        if(setting->pmem_ciq1_size) {
+                pmem_ciq1_pdata.start = setting->pmem_ciq1_start;
+                pmem_ciq1_pdata.size = setting->pmem_ciq1_size;
+                platform_device_register(&pmem_ciq1_device);
+        }
+
+	printk("pmem_ciq2_device ");
+        if(setting->pmem_ciq2_size) {
+                pmem_ciq2_pdata.start = setting->pmem_ciq2_start;
+                pmem_ciq2_pdata.size = setting->pmem_ciq2_size;
+                platform_device_register(&pmem_ciq2_device);
+        }
+
+	printk("pmem_ciq3_device ");
+        if(setting->pmem_ciq3_size) {
+                pmem_ciq3_pdata.start = setting->pmem_ciq3_start;
+                pmem_ciq3_pdata.size = setting->pmem_ciq3_size;
+                platform_device_register(&pmem_ciq3_device);
+        }
 #endif
+}
 
 #if 0
 static struct platform_device *msm_serial_devices[] __initdata = {

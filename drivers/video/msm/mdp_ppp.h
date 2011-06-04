@@ -16,6 +16,7 @@
 #define _VIDEO_MSM_MDP_PPP_H_
 
 #include <linux/types.h>
+#define  PPP_DUMP_BLITS 0
 
 struct ppp_regs {
 	uint32_t src0;
@@ -64,7 +65,7 @@ struct mdp_rect;
 struct mdp_blit_req;
 struct fb_info;
 
-#ifdef CONFIG_FB_MSM_MDP_PPP
+#if 1
 int mdp_get_bytes_per_pixel(int format);
 int mdp_ppp_blit(struct mdp_info *mdp, struct fb_info *fb,
 		 struct mdp_blit_req *req);
@@ -75,18 +76,20 @@ int mdp_ppp_blit_and_wait(struct mdp_info *mdp, struct mdp_blit_req *req,
 			  unsigned long dst_start, unsigned long dst_len);
 
 /* these must be provided by h/w specific ppp files */
-void mdp_ppp_init_scale(struct mdp_info *mdp);
-int mdp_ppp_cfg_scale(struct mdp_info *mdp, struct ppp_regs *regs,
+void mdp_ppp_init_scale(const struct mdp_info *mdp);
+int mdp_ppp_cfg_scale(const struct mdp_info *mdp, struct ppp_regs *regs,
 		 struct mdp_rect *src_rect, struct mdp_rect *dst_rect,
 		 uint32_t src_format, uint32_t dst_format);
-int mdp_ppp_load_blur(struct mdp_info *mdp);
+int mdp_ppp_load_blur(const struct mdp_info *mdp);
 int mdp_ppp_cfg_edge_cond(struct mdp_blit_req *req, struct ppp_regs *regs);
 int mdp_ppp_validate_blit(struct mdp_info *mdp, struct mdp_blit_req *req);
 int mdp_ppp_do_blit(struct mdp_info *mdp, struct mdp_blit_req *req,
 		    struct file *src_file, unsigned long src_start,
 		    unsigned long src_len, struct file *dst_file,
 		    unsigned long dst_start, unsigned long dst_len);
-
+int mdp_fb_mirror(struct mdp_device *mdp_dev,
+		struct fb_info *src_fb, struct fb_info *dst_fb,
+		struct mdp_blit_req *req);
 #else
 
 static inline int mdp_get_bytes_per_pixel(int format) { return -1; }

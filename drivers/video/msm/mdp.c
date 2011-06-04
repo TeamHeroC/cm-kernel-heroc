@@ -25,6 +25,7 @@
 #include <linux/file.h>
 #include <linux/android_pmem.h>
 #include <linux/major.h>
+#include <linux/msm_hw3d.h>
 
 #include <mach/msm_iomap.h>
 #include <mach/msm_fb.h>
@@ -40,7 +41,6 @@ struct class *mdp_class;
 
 static DECLARE_WAIT_QUEUE_HEAD(mdp_ppp_waitqueue);
 static unsigned int mdp_irq_mask;
-static unsigned int mdp_dma_timer_enable = 0;
 struct clk *mdp_clk_to_disable_later = 0;
 static struct  mdp_blit_req *timeout_req;
 #ifdef CONFIG_FB_MSM_OVERLAY
@@ -166,12 +166,6 @@ static irqreturn_t mdp_isr(int irq, void *data)
 
 //	pr_info("%s: status=%08x (irq_mask=%08x)\n", __func__, status,
 //		mdp_irq_mask);
-
-	if (mdp_dma_timer_enable) {
-		del_timer_sync(&mdp->dma_timer);
-		mdp_dma_timer_enable = 0;
-	}
-
 	status &= mdp_irq_mask;
 #ifdef CONFIG_MSM_MDP40
 	if (mdp->mdp_dev.overrides & MSM_MDP4_MDDI_DMA_SWITCH) {
@@ -194,47 +188,13 @@ static irqreturn_t mdp_isr(int irq, void *data)
 		}
 	}
 
-#ifndef CONFIG_MSM_MDP40
 	mdp_ppp_handle_isr(mdp, status);
-#endif
+
 	if (status)
 		locked_disable_mdp_irq(mdp, status);
 
 	spin_unlock_irqrestore(&mdp->lock, irq_flags);
 	return IRQ_HANDLED;
-}
-
-static void mdp_do_dma_timer(unsigned long data)
-{
-	uint32_t status;
-	struct mdp_info *mdp = (struct mdp_info *) data;
-	unsigned long irq_flags=0;
-	int i;
-
-	spin_lock_irqsave(&mdp->lock, irq_flags);
-
-	status = mdp_readl(mdp, MDP_INTR_STATUS);
-	mdp_writel(mdp, mdp_irq_mask, MDP_INTR_CLEAR);
-
-	for (i = 0; i < MSM_MDP_NUM_INTERFACES; ++i) {
-		struct mdp_out_interface *out_if = &mdp->out_if[i];
-		if (mdp_irq_mask & out_if->dma_mask) {
-			if (out_if->dma_cb) {
-				out_if->dma_cb->func(out_if->dma_cb);
-				out_if->dma_cb = NULL;
-			}
-			wake_up(&out_if->dma_waitqueue);
-		}
-		if (mdp_irq_mask & out_if->irq_mask) {
-			out_if->irq_cb->func(out_if->irq_cb);
-			out_if->irq_cb = NULL;
-		}
-	}
-
-	locked_disable_mdp_irq(mdp, mdp_irq_mask);
-
-	spin_unlock_irqrestore(&mdp->lock, irq_flags);
-
 }
 
 static uint32_t mdp_check_mask(struct mdp_info *mdp, uint32_t mask)
@@ -390,6 +350,57 @@ static void mdp_dmas_to_mddi(void *priv, uint32_t addr, uint32_t stride,
 	mdp_writel(mdp, dma2_cfg, MDP_DMA_S_CONFIG);
 	mdp_writel(mdp, 0, MDP_DMA_S_START);
 }
+#else
+static void mdp_dmas_to_mddi(void *priv, uint32_t addr, uint32_t stride,
+                uint32_t width, uint32_t height, uint32_t x, uint32_t y)
+{
+        struct mdp_info *mdp = priv;
+        uint32_t dma2_cfg;
+        uint16_t ld_param = 1;
+
+        dma2_cfg = DMA_PACK_TIGHT |
+                DMA_PACK_ALIGN_LSB |
+                DMA_OUT_SEL_AHB |
+                DMA_IBUF_NONCONTIGUOUS;
+
+        dma2_cfg |= mdp->format;
+
+#if defined CONFIG_MSM_MDP22 || defined CONFIG_MSM_MDP30
+        if (mdp->format == DMA_IBUF_FORMAT_RGB888_OR_ARGB8888)
+#else
+        if (mdp->format == DMA_IBUF_FORMAT_XRGB8888)
+#endif
+                dma2_cfg |= DMA_PACK_PATTERN_BGR;
+        else
+                dma2_cfg |= DMA_PACK_PATTERN_RGB;
+
+        dma2_cfg |= DMA_OUT_SEL_MDDI;
+
+        dma2_cfg |= DMA_MDDI_DMAOUT_LCD_SEL_PRIMARY;
+
+        dma2_cfg |= DMA_DITHER_EN;
+
+#if defined(CONFIG_MSM_FB_565)
+        dma2_cfg |= DMA_DSTC0G_6BITS | DMA_DSTC1B_5BITS | DMA_DSTC2R_5BITS;
+#else
+        /* 666 18BPP */
+        dma2_cfg |= DMA_DSTC0G_6BITS | DMA_DSTC1B_6BITS | DMA_DSTC2R_6BITS;
+#endif
+        /* setup size, address, and stride */
+        mdp_writel(mdp, (height << 16) | (width), MDP_DMA_S_SIZE);
+        mdp_writel(mdp, addr, MDP_DMA_S_IBUF_ADDR);
+        mdp_writel(mdp, stride, MDP_DMA_S_IBUF_Y_STRIDE);
+
+        /* set y & x offset and MDDI transaction parameters */
+        mdp_writel(mdp, (y << 16) | (x), MDP_DMA_S_OUT_XY);
+        mdp_writel(mdp, ld_param, MDP_MDDI_PARAM_WR_SEL);
+        mdp_writel(mdp, (MDDI_VDO_PACKET_DESC << 16) | MDDI_VDO_PACKET_PRIM,
+                        MDP_MDDI_PARAM);
+
+        mdp_writel(mdp, dma2_cfg, MDP_DMA_S_CONFIG);
+        mdp_writel(mdp, 0, MDP_DMA_S_START);
+}
+#endif
 
 static void mdp_dma_to_mddi(void *priv, uint32_t addr, uint32_t stride,
 			    uint32_t width, uint32_t height, uint32_t x,
@@ -483,7 +494,6 @@ static void mdp_dma_to_mddi(void *priv, uint32_t addr, uint32_t stride,
 	mdp_writel(mdp, 0, MDP_DMA_P_START);
 #endif
 }
-#endif	/* ifndef CONFIG_MSM_MDP40 */
 
 void mdp_dma(struct mdp_device *mdp_dev, uint32_t addr, uint32_t stride,
 	     uint32_t width, uint32_t height, uint32_t x, uint32_t y,
@@ -502,18 +512,13 @@ void mdp_dma(struct mdp_device *mdp_dev, uint32_t addr, uint32_t stride,
 
 	spin_lock_irqsave(&mdp->lock, flags);
 	if (locked_enable_mdp_irq(mdp, out_if->dma_mask)) {
-		/* something wrong in dma, workaround it */
-                mdp_dma_timer_enable = 1;
 		pr_err("%s: busy\n", __func__);
+		goto done;
 	}
 
 	out_if->dma_cb = callback;
 	out_if->dma_start(out_if->priv, addr, stride, width, height, x, y);
-
-	if (mdp_dma_timer_enable)
-		mod_timer(&mdp->dma_timer,
-			jiffies + msecs_to_jiffies(17));
-
+done:
 	spin_unlock_irqrestore(&mdp->lock, flags);
 }
 
@@ -746,6 +751,10 @@ int register_mdp_client(struct class_interface *cint)
 	return class_interface_register(cint);
 }
 
+/* leaving in for now, even if later patches remove */
+
+#include "mdp_csc_table.h"
+
 int mdp_probe(struct platform_device *pdev)
 {
 	struct resource *resource;
@@ -774,6 +783,7 @@ int mdp_probe(struct platform_device *pdev)
 
 	mdp->base = ioremap(resource->start,
 			    resource->end - resource->start);
+	
 	if (mdp->base == 0) {
 		printk(KERN_ERR "msmfb: cannot allocate mdp regs!\n");
 		ret = -ENOMEM;
@@ -835,6 +845,7 @@ int mdp_probe(struct platform_device *pdev)
 
 	mdp->clk = clk_get(&pdev->dev, "mdp_clk");
 	if (IS_ERR(mdp->clk)) {
+		kfree(mdp);
 		printk(KERN_INFO "mdp: failed to get mdp clk");
 		ret = PTR_ERR(mdp->clk);
 		goto error_get_mdp_clk;
@@ -890,7 +901,6 @@ int mdp_probe(struct platform_device *pdev)
 		goto error_device_register;
 
 	setup_timer(&mdp->standby_timer, mdp_do_standby_timer, (unsigned long )mdp);
-	setup_timer(&mdp->dma_timer, mdp_do_dma_timer, (unsigned long )mdp);
 
 
 	pr_info("%s: initialized\n", __func__);
